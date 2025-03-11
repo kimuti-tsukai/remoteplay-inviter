@@ -7,30 +7,43 @@ pub fn handle_ws_error(err: WsError) -> Result<()> {
     match err {
         // In case of Bad Request
         WsError::Http(res) if res.status() == 400 => {
-            let result: Result<()> = try {
+            let result: Result<()> = 'tryblock: {
                 // Get the response body
-                let header = res
+                let header = match res
                     .headers()
                     .get("X-Error")
-                    .context("Connection refused without error message")?;
-                let text = header
+                    .context("Connection refused without error message")
+                {
+                    Ok(header) => header,
+                    Err(err) => break 'tryblock Err(err),
+                };
+                let text = match header
                     .to_str()
-                    .context("Connection refused with invalid error message")?;
+                    .context("Connection refused with invalid error message")
+                {
+                    Ok(text) => text,
+                    Err(err) => break 'tryblock Err(err),
+                };
                 // Parse JSON
                 let ConnectionErrorMessage { message, error } =
-                    serde_json::from_str::<ConnectionErrorMessage>(text)
-                        .context("Connection refused with invalid JSON")?;
+                    match serde_json::from_str::<ConnectionErrorMessage>(text) {
+                        Ok(json) => json,
+                        Err(err) => break 'tryblock Err(err.into()),
+                    };
                 // If parsing is successful
                 match error {
                     // If the version is outdated
                     ConnectionErrorType::Outdated { required, download } => {
                         // Display the content
-                        console::printdoc! {"
+                        if let Err(err) = console::printdoc! {"
 
                             ↑ Update required: {VERSION} to {required}
                               Download: {download}
-                            
-                            "};
+
+                            "}
+                        {
+                            break 'tryblock Err(err);
+                        }
 
                         // Open the browser
                         let _ = webbrowser::open(&download);
@@ -46,22 +59,26 @@ pub fn handle_ws_error(err: WsError) -> Result<()> {
                                 .join("\n");
 
                             // Display the error message
-                            console::printdoc! {
+                            if let Err(err) = console::printdoc! {
                                 "
 
                                     ☓ Connection error:
                                     {message}
 
                                     "
+                            } {
+                                break 'tryblock Err(err);
                             }
                         }
                     }
                 }
+
+                Ok(())
             };
 
             if let Err(err) = result {
                 // If parsing fails
-                console::eprintln!("☓ {err}");
+                console::eprintln!("☓ {err}")?;
             }
         }
         // For other HTTP errors

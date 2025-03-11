@@ -73,7 +73,7 @@ impl Handler {
 
                 {message}
 
-                "};
+                "}?;
 
                 // If there is a copy, copy it
                 if let Some(copy) = copy {
@@ -81,7 +81,7 @@ impl Handler {
                     if let Err(_err) = ClipboardProvider::new()
                         .map(|mut ctx: ClipboardContext| ctx.set_contents(copy.clone()))
                     {
-                        console::eprintln!("☓ Failed to copy to clipboard: {}", copy);
+                        console::eprintln!("☓ Failed to copy to clipboard: {}", copy)?;
                     }
                 }
 
@@ -120,7 +120,7 @@ impl Handler {
                 console::println!(
                     "-> Create Panel       : claimer={claimer}, game_id={0}",
                     app_id
-                );
+                )?;
 
                 // Create the response data
                 ClientMessage {
@@ -149,8 +149,8 @@ impl Handler {
                 // Log the output
                 let claimer = msg.user.as_ref().map_or_else(|| "?", |s| &s.name);
                 console::println!(
-                    "-> Create Invite Link : claimer={claimer}, guest_id={guest_id}, game_id={game}, invite_url={connect_url}", 
-                );
+                    "-> Create Invite Link : claimer={claimer}, guest_id={guest_id}, game_id={game}, invite_url={connect_url}",
+                )?;
 
                 // Create the response data
                 ClientMessage {
@@ -196,20 +196,26 @@ impl Handler {
                 let mut guest_data = guest_data.lock().await;
                 guest_data.user_set.insert(guest_id);
                 let user_name = guest_data.guest_map.get(&guest_id).map_or_else(|| "?", |s| s);
-                let _: Result<()> = try {
+                let _: Result<()> = 'tryblock: {
                     // Log the output
-                    console::println!(
+                    if let Err(err) = console::println!(
                         "-> Player Joined        : claimer={user_name}, guest_id={guest_id}, steam_id={invitee}",
-                    );
+                    ) {
+                        break 'tryblock Err(err);
+                    }
 
                     // Display the user list
                     let users_text = guest_data
                         .user_set
                         .iter()
-                        .map(|id| format!("[{}]{}", id, guest_data.guest_map.get(&id).map_or_else(|| "?", |s| s)))
+                        .map(|id| format!("[{}]{}", id, guest_data.guest_map.get(id).map_or_else(|| "?", |s| s)))
                         .collect::<Vec<String>>()
                         .join(", ");
-                    console::print_update!("★ Players({}): {users_text}", guest_data.user_set.len());
+                    if let Err(err) = console::print_update!("★ Players({}): {users_text}", guest_data.user_set.len()) {
+                        break 'tryblock Err(err);
+                    }
+
+                    Ok(())
                 };
             });
         });
@@ -220,20 +226,26 @@ impl Handler {
                 let mut guest_data = guest_data.lock().await;
                 guest_data.user_set.remove(&guest_id);
                 let user_name = guest_data.guest_map.get(&guest_id).map_or_else(|| "?", |s| s);
-                let _: Result<()> = try {
+                let _: Result<()> = 'tryblock: {
                     // Log the output
-                    console::println!(
+                    if let Err(err) = console::println!(
                         "-> Player Left          : claimer={user_name}, guest_id={guest_id}, steam_id={invitee}",
-                    );
+                    ) {
+                        break 'tryblock Err(err);
+                    }
 
                     // Display the user list
                     let users_text = guest_data
                         .user_set
                         .iter()
-                        .map(|id| format!("[{}]{}", id, guest_data.guest_map.get(&id).map_or_else(|| "?", |s| s)))
+                        .map(|id| format!("[{}]{}", id, guest_data.guest_map.get(id).map_or_else(|| "?", |s| s)))
                         .collect::<Vec<String>>()
                         .join(", ");
-                    console::print_update!("★ Players({}): {users_text}", guest_data.user_set.len());
+                    if let Err(err) = console::print_update!("★ Players({}): {users_text}", guest_data.user_set.len()) {
+                        break 'tryblock Err(err);
+                    }
+
+                    Ok(())
                 };
             });
         });

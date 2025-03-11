@@ -1,5 +1,3 @@
-#![feature(try_blocks)]
-
 use anyhow::{Context as _, Result};
 use dotenvy_macro::dotenv;
 use futures::SinkExt;
@@ -48,15 +46,15 @@ async fn main() -> Result<()> {
                         ╠╦╝├┤ ││││ │ │ ├┤ ├─┘│  ├─┤└┬┘  ║│││└┐┌┘│ │ ├┤ ├┬┘
                         ╩╚═└─┘┴ ┴└─┘ ┴ └─┘┴  ┴─┘┴ ┴ ┴   ╩┘└┘ └┘ ┴ ┴ └─┘┴└─
                            Version: {VERSION}                   by Kamesuta
-                                                            
-                Invite your friends via Discord and play Steam games together for free! 
+
+                Invite your friends via Discord and play Steam games together for free!
             ------------------------------------------------------------------------------
-        
-        "};
+
+        "}?;
 
         // Version command
         if std::env::args().any(|arg| arg == "--version" || arg == "-v") {
-            console::println!("✓ Version: {}", VERSION);
+            console::println!("✓ Version: {}", VERSION)?;
             return Ok(());
         }
 
@@ -72,7 +70,7 @@ async fn main() -> Result<()> {
                 Options:
                     -v, --version    Display the version of the program
                     -h, --help       Display this help message
-            "};
+            "}?;
             return Ok(());
         }
 
@@ -82,7 +80,7 @@ async fn main() -> Result<()> {
         {
             Ok(steam) => Arc::new(Mutex::new(steam)),
             Err(err) => {
-                console::eprintln!("☓ {}", err);
+                console::eprintln!("☓ {}", err)?;
                 break 'main;
             }
         };
@@ -101,14 +99,24 @@ async fn main() -> Result<()> {
         let mut retry_sec = RetrySec::new();
 
         // URL to connect to
-        let result: Result<String> = try {
+        let result: Result<String> = 'tryblock: {
             // Read the endpoint configuration file
-            let endpoint_config = config::read_endpoint_config()?;
+            let endpoint_config = match config::read_endpoint_config() {
+                Ok(config) => config,
+                Err(err) => {
+                    break 'tryblock Err(err);
+                }
+            };
 
             // Read or generate the configuration file (if it doesn't exist)
-            let config = read_or_generate_config(|| Config {
+            let config = match read_or_generate_config(|| Config {
                 uuid: Uuid::new_v4().to_string(),
-            })?;
+            }) {
+                Ok(config) => config,
+                Err(err) => {
+                    break 'tryblock Err(err);
+                }
+            };
 
             // Session ID
             let session_id: u32 = rand::random();
@@ -116,46 +124,70 @@ async fn main() -> Result<()> {
             // Endpoint URL
             let endpoint_url = match endpoint_config {
                 Some(e) => {
-                    console::println!("✓ Using custom endpoint URL: {}", e.url);
+                    if let Err(err) = console::println!("✓ Using custom endpoint URL: {}", e.url)
+                    {
+                        break 'tryblock Err(err);
+                    }
                     e.url
                 }
                 None => DEFAULT_URL.to_string(),
             };
 
             // Create the URL
-            let uri: Uri = endpoint_url.parse().context("Failed to parse URL")?;
-            let uri = Builder::from(uri)
+            let uri: Uri = match endpoint_url.parse().context("Failed to parse URL") {
+                Ok(uri) => uri,
+                Err(err) => {
+                    break 'tryblock Err(err);
+                }
+            };
+            let uri = match Builder::from(uri)
                 .path_and_query(format!(
                     "/ws?v={VERSION}&token={0}&session={session_id}",
                     config.uuid
                 ))
                 .build()
-                .context("Failed to build URL")?;
-            uri.to_string()
+                .context("Failed to build URL")
+            {
+                Ok(uri) => uri,
+                Err(err) => {
+                    break 'tryblock Err(err);
+                }
+            };
+            Ok(uri.to_string())
         };
         let url = match result {
             Ok(url) => url,
             Err(err) => {
-                console::eprintln!("☓ {}", err);
+                console::eprintln!("☓ {}", err)?;
                 break 'main;
             }
         };
 
         loop {
-            let result: Result<()> = try {
+            let result: Result<()> = 'tryblock: {
                 // Display the reconnection message
                 if reconnect {
-                    console::println!("↪ Reconnecting to the server...");
+                    if let Err(err) = console::println!("↪ Reconnecting to the server...") {
+                        break 'tryblock Err(err);
+                    }
                 }
 
                 // Create a WebSocket client
-                let connect_result = timeout(Duration::from_secs(10), connect_async(&url))
+                let connect_result = match timeout(Duration::from_secs(10), connect_async(&url))
                     .await
-                    .context("Connection timed out to the server")?;
+                    .context("Connection timed out to the server")
+                {
+                    Ok(r) => r,
+                    Err(err) => {
+                        break 'tryblock Err(err);
+                    }
+                };
                 let ws_stream = match connect_result {
                     Ok((ws_stream, _)) => ws_stream,
                     Err(err) => {
-                        handle_ws_error(err)?;
+                        if let Err(err) = handle_ws_error(err) {
+                            break 'tryblock Err(err);
+                        }
                         // If OK is returned, break the loop and exit
                         break 'main;
                     }
@@ -165,62 +197,81 @@ async fn main() -> Result<()> {
                 let (mut write, mut read) = ws_stream.split();
 
                 // Display the reconnection message
-                if reconnect {
-                    console::println!("✓ Reconnected!");
+                if let Err(err) = if reconnect {
+                    console::println!("✓ Reconnected!")
                 } else {
-                    console::println!("✓ Connected to the server!");
+                    console::println!("✓ Connected to the server!")
+                } {
+                    break 'tryblock Err(err);
                 }
 
                 // Loop to process messages received from the server
-                while let Some(message) = timeout(Duration::from_secs(60), read.next())
-                    .await
-                    .context("Connection timed out")?
-                {
+                while let Some(message) = {
+                    match timeout(Duration::from_secs(60), read.next())
+                        .await
+                        .context("Connection timed out")
+                    {
+                        Ok(message) => message,
+                        Err(err) => {
+                            break 'tryblock Err(err);
+                        }
+                    }
+                } {
                     // Process each message
-                    match message.context("Failed to receive message from the server")? {
-                        Message::Close(_) => break,
-                        Message::Ping(ping) => {
+                    match message.context("Failed to receive message from the server") {
+                        Ok(Message::Close(_)) => break,
+                        Ok(Message::Ping(ping)) => {
                             // Send a Pong message
-                            write
+                            if let Err(err) = write
                                 .send(Message::Pong(ping))
                                 .await
-                                .context("Failed to send pong message to the server")?;
-
-                            // Reset the retry seconds
-                            retry_sec.reset();
-                        }
-                        Message::Text(text) => {
-                            // Parse the JSON data
-                            let msg: ServerMessage = serde_json::from_str(&text)
-                                .context("Failed to deserialize JSON message from the server")?;
-
-                            // Process the message
-                            if handler.handle_server_message(msg, &mut write).await? {
-                                // If the exit flag is set, break the loop and exit
-                                break 'main;
+                                .context("Failed to send pong message to the server")
+                            {
+                                break 'tryblock Err(err);
                             }
 
                             // Reset the retry seconds
                             retry_sec.reset();
                         }
-                        _ => (),
+                        Ok(Message::Text(text)) => {
+                            // Parse the JSON data
+                            let msg: ServerMessage = match serde_json::from_str(&text) {
+                                Ok(msg) => msg,
+                                Err(err) => break 'tryblock Err(err.into()),
+                            };
+
+                            // Process the message
+                            match handler.handle_server_message(msg, &mut write).await {
+                                // If the exit flag is set, break the loop and exit
+                                Ok(true) => break 'main,
+                                Ok(false) => (),
+                                Err(err) => break 'tryblock Err(err),
+                            }
+
+                            // Reset the retry seconds
+                            retry_sec.reset();
+                        }
+                        Ok(_) => (),
+                        Err(err) => break 'tryblock Err(err),
                     }
                 }
+
+                Ok(())
             };
             if let Err(err) = result {
-                console::eprintln!("☓ {}", err);
+                console::eprintln!("☓ {}", err)?;
             }
 
             // Reconnect to the server if the connection is lost
             let sec = retry_sec.next();
-            console::println!("↪ Connection lost. Reconnecting in {sec} seconds...");
+            console::println!("↪ Connection lost. Reconnecting in {sec} seconds...")?;
             time::sleep(Duration::from_secs(sec)).await;
             reconnect = true;
         }
     }
 
     // Wait for input before exiting
-    console::println!("□ Press Ctrl+C to exit...");
+    console::println!("□ Press Ctrl+C to exit...")?;
     let _ = tokio::signal::ctrl_c().await;
 
     Ok(())
