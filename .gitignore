@@ -73,3 +73,6 @@ Cargo.lock
 
 # env
 .env
+
+# CMake
+build
