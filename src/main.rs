@@ -2,7 +2,7 @@ use anyhow::{Context as _, Result};
 use dotenvy_macro::dotenv;
 use futures::SinkExt;
 use futures_util::stream::StreamExt;
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 use steam_stuff::SteamStuff;
 use tokio::{
     sync::Mutex,
@@ -122,15 +122,15 @@ async fn main() -> Result<()> {
             let session_id: u32 = rand::random();
 
             // Endpoint URL
-            let endpoint_url = match endpoint_config {
+            let endpoint_url: Cow<'_, str> = match endpoint_config {
                 Some(e) => {
                     if let Err(err) = console::println!("✓ Using custom endpoint URL: {}", e.url)
                     {
                         break 'tryblock Err(err);
                     }
-                    e.url
+                    e.url.into()
                 }
-                None => DEFAULT_URL.to_string(),
+                None => DEFAULT_URL.into(),
             };
 
             // Create the URL
